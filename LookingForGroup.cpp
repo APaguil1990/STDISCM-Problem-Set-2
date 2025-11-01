@@ -223,3 +223,65 @@ public:
         std::cout << "System Total: " << totalParties << " parties, " << totalTime << " seconds\n";
     }
 };
+
+int main() {
+    std::cout << "=== LFG (Looking for Group) Dungeon Queuing System ===\n\n"; 
+
+    // Get user input 
+    int n, t, h, d, t1, t2; 
+
+    std::cout << "Enter maximum number of concurrent instances (n): "; 
+    std::cin >> n; 
+
+    std::cout << "Enter number of tank players in queue (t): "; 
+    std::cin >> t; 
+
+    std::cout << "Enter number of healer players in queue (h): "; 
+    std::cin >> h; 
+
+    std::cout << "Enter a number of DPS players in queue (d): "; 
+    std::cin >> d; 
+
+    std::cout << "Enter a minimum dungeon clear time (t1): "; 
+    std::cin >> t1; 
+
+    std::cout << "Enter maximum dungeon clear time (t2): "; 
+    std::cin >> t2;
+
+    // Validate input 
+    if (n <= 0 || t < 0 || h < 0 || d < 0 || t1 < 0 || t2 < t1) {
+        std::cerr << "Invalid input parameters!\n"; 
+        return 1;
+    } 
+
+    if (t2 > 15) {
+        std::cout << "Note: t2 should be <= 15 for testing. Adjusting to 15.\n"; 
+        t2 = 15;
+    } 
+
+    // Create and start LFG 
+    LFGSystem lfgsystem(n, t1, t2); 
+    std::cout << "\nStarting LFG system...\n"; 
+    lfgsystem.start();
+
+    // Add initial players 
+    lfgsystem.addPlayers(t, h, d); 
+
+    // Display initial status 
+    lfgsystem.displayStatus(); 
+
+    // Wait for all parties to complete 
+    std::cout << "\nWaiting for all parties to complete...\n"; 
+    lfgsystem.waitForCompletion(); 
+
+    // Stop the system 
+    lfgsystem.stop(); 
+
+    // Display final status and summary 
+    lfgsystem.displayStatus(); 
+    lfgsystem.displaySummary(); 
+
+    std::cout << "\nLFG system shutdown complete."; 
+
+    return 0;
+}
