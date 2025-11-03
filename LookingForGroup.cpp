@@ -1,5 +1,6 @@
 #include <iostream> 
 #include <thread> 
+#include <mutex>
 #include <condition_variable> 
 #include <vector> 
 #include <queue> 
@@ -8,6 +9,7 @@
 #include <chrono> 
 #include <string> 
 #include <iomanip> 
+#include <algorithm> 
 
 class LFGSystem {
 private: 
@@ -27,16 +29,18 @@ private:
         int partiesServed; 
         int totalTimeServed; 
         bool active; 
+        std::thread thread;
 
         Instance(int i) : id(i), status("empty"), partiesServed(0), totalTimeServed(0), active(false) {} 
     }; 
 
     std::vector<Instance> instances; 
-    std::vector<std::thread> instanceThreads; 
+    // std::vector<std::thread> instanceThreads; 
 
     // Statistics 
     std::atomic<int> totalPartiesFormed{0}; 
     std::atomic<bool> running{true}; 
+    std::atomic<int> instancesWaiting{0};
 
     // Configuration 
     int maxInstances; 
@@ -81,18 +85,53 @@ public:
 
     // Check if party can be formed 
     bool canFormParty() { 
-        return !tankQueue.empty() && !healerQueue.empty() && dpsQueue.size() >= 3; 
+        // return !tankQueue.empty() && !healerQueue.empty() && dpsQueue.size() >= 3; 
+        return tankQueue.size() >= 1 && healerQueue.size() >= 1 && dpsQueue.size() >= 3;
     } 
 
     // Form a party and assign to instance 
-    void formParty(int instanceId) { 
+    // void formParty(int instanceId) { 
+    //     std::unique_lock<std::mutex> lock(mtx); 
+
+    //     // Wait until we can form a party or system is stopping 
+    //     cv.wait(lock, [this] { return canFormParty() || !running.load(); }); 
+    //     if (!running.load()) return; 
+
+    //     // Rmeove pl;ayers from queues to form party 
+    //     tankQueue.pop(); 
+    //     healerQueue.pop(); 
+    //     for (int i = 0; i < 3; ++i) {
+    //         dpsQueue.pop();
+    //     } 
+
+    //     // Update instance status 
+    //     instances[instanceId].status = "active"; 
+    //     instances[instanceId].active = true; 
+    //     instances[instanceId].partiesServed++; 
+    //     totalPartiesFormed++; 
+
+    //     std::cout << "Party formed and assigned to Instance " << (instanceId + 1) << "\n";
+    //     lock.unlock();
+
+    //     // Simulate dungeon run 
+    //     runDungeon(instanceId); 
+    // } 
+
+    // Improved party formation with better distribution 
+    bool tryFormParty(int instanceID) {
         std::unique_lock<std::mutex> lock(mtx); 
 
-        // Wait until we can form a party or system is stopping 
-        cv.wait(lock, [this] { return canFormParty() || !running.load(); }); 
-        if (!running.load()) return; 
+        // Use timed wait to prevent instances from starving one another 
+        if (!cv.wait_for(lock, std::chrono::milliseconds(100), 
+                        [this] { return canFormParty() && instancesWaiting > 0; })) {
+            return false;
+        } 
 
-        // Rmeove pl;ayers from queues to form party 
+        if (!canFormParty() || !running.load()) {
+            return false;
+        } 
+
+        // Remove players from queues to form party 
         tankQueue.pop(); 
         healerQueue.pop(); 
         for (int i = 0; i < 3; ++i) {
@@ -100,16 +139,43 @@ public:
         } 
 
         // Update instance status 
-        instances[instanceId].status = "active"; 
-        instances[instanceId].active = true; 
-        instances[instanceId].partiesServed++; 
+        instances[instanceID].status = "active"; 
+        instances[instanceID].active = true; 
+        instances[instanceID].partiesServed++; 
         totalPartiesFormed++; 
 
-        std::cout << "Party formed and assigned to Instance " << (instanceId + 1) << "\n";
-        lock.unlock();
+        std::cout << "Instance " << (instanceID + 1) << " formed a party. "
+                  << "Remaining - Tanks: " << tankQueue.size() 
+                  << ", Healers: " << healerQueue.size() 
+                  << ", DPS: " << dpsQueue.size() << "\n";
+        
+        return true;
+    }
 
-        // Simulate dungeon run 
-        runDungeon(instanceId);
+    // Instance thread function with improved synchronzation 
+    void instanceWorker(int instanceId) {
+        while (running.load()) {
+            {
+                std::lock_guard<std::mutex> lock(mtx); 
+                instancesWaiting++; 
+            } 
+
+            if (tryFormParty(instanceId)) {
+                // Successfully formed a party, run dungeon 
+                runDungeon(instanceId); 
+
+                // Small delay to give other instances a chance 
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            } else {
+                // Couldn't form party, wait before trying 
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            } 
+
+            {
+                std::lock_guard<std::mutex> lock(mtx); 
+                instancesWaiting--;
+            }
+        }
     }
 
     // Simulate dungeon run with random time 
@@ -134,27 +200,41 @@ public:
 
     // Start LFG system 
     void start() {
-        instanceThreads.reserve(maxInstances); 
+        // instanceThreads.reserve(maxInstances); 
+        // for (int i = 0; i < maxInstances; ++i) { 
+        //     instanceThreads.emplace_back([this, i] () {
+        //         while (running.load()) {
+        //             formParty(i); 
+        //             // small delay to prevent looping 
+        //             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        //         }
+        //     });
+        // }
 
-        for (int i = 0; i < maxInstances; ++i) { 
-            instanceThreads.emplace_back([this, i] () {
-                while (running.load()) {
-                    formParty(i); 
-                    // small delay to prevent looping 
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
+        for (int i = 0; i < maxInstances; ++i) {
+            instances[i].thread = std::thread([this, i]() {
+                instanceWorker(i);
             });
         }
     } 
 
     // Stop LFG system 
     void stop() {
+        // running.store(false); 
+        // cv.notify_all(); 
+
+        // for (auto& thread : instanceThreads) {
+        //     if (thread.joinable()) {
+        //         thread.join();
+        //     }
+        // } 
+
         running.store(false); 
         cv.notify_all(); 
 
-        for (auto& thread : instanceThreads) {
-            if (thread.joinable()) {
-                thread.join();
+        for (auto& instance : instances) {
+            if (instance.thread.joinable()) {
+                instance.thread.join();
             }
         }
     }
@@ -176,30 +256,52 @@ public:
         std::cout << "Tanks in queue: " << tankQueue.size() << "\n"; 
         std::cout << "Healers in queue: " << healerQueue.size() << "\n"; 
         std::cout << "DPS in queue: " << dpsQueue.size() << "\n"; 
-        std::cout << "Total parties formed: " << totalPartiesFormed.load() << "\n";
+        std::cout << "Total parties formed: " << totalPartiesFormed.load() << "\n"; 
+        std::cout << "Instances waiting for parties: " << instancesWaiting.load() << "\n";
     }
 
     // Wait for all current parties to complete 
     void waitForCompletion() {
-        bool hasActiveInstances; 
+        // bool hasActiveInstances; 
 
+        // do {
+        //     std::this_thread::sleep_for(std::chrono::seconds(1)); 
+
+        //     std::lock_guard<std::mutex> lock(mtx); 
+        //     hasActiveInstances = false; 
+        //     for (const auto& instance : instances) {
+        //         if (instance.active) {
+        //             hasActiveInstances = true; 
+        //             break;
+        //         }
+        //     }
+
+        //     // Check if parties can be formed 
+        //     if (!hasActiveInstances && !canFormParty()) {
+        //         break;
+        //     }
+        // } while (hasActiveInstances || canFormParty()); 
+
+        bool shouldWait; 
         do {
             std::this_thread::sleep_for(std::chrono::seconds(1)); 
 
             std::lock_guard<std::mutex> lock(mtx); 
-            hasActiveInstances = false; 
+            shouldWait = false; 
+
+            // Check if any isntance is active 
             for (const auto& instance : instances) {
                 if (instance.active) {
-                    hasActiveInstances = true; 
+                    shouldWait = true; 
                     break;
                 }
-            }
+            } 
 
-            // Check if parties can be formed 
-            if (!hasActiveInstances && !canFormParty()) {
-                break;
+            // Check if more parties can be formed 
+            if (!shouldWait && canFormParty()) {
+                shouldWait = true;
             }
-        } while (hasActiveInstances || canFormParty()); 
+        } while(shouldWait);
     }
 
     // Get summary  statistics 
@@ -207,20 +309,40 @@ public:
         std::lock_guard<std::mutex> lock(mtx); 
 
         std::cout << "\n=== Final Sumamry ===\n"; 
+
+        int totalParties = 0; 
+        int totalTime = 0;
         for (const auto& instance : instances) {
             std::cout << "Instance " << std::setw(2) << instance.id 
                       << ": " << std::setw(3) << instance.partiesServed << " parties, " 
                       << std::setw(4) << instance.totalTimeServed << " seconds total \n"; 
+            
+            totalParties += instance.partiesServed; 
+            totalTime += instance.totalTimeServed;
         }
 
-        int totalParties = 0; 
-        int totalTime = 0; 
-        for (const auto& instance : instances) {
-            totalParties += instance.partiesServed; 
-            totalTime += instance.totalTimeServed; 
-        } 
-
         std::cout << "System Total: " << totalParties << " parties, " << totalTime << " seconds\n";
+
+        // Calculate distribution fairness 
+        if (totalParties > 0) {
+            double average = static_cast<double>(totalParties) / instances.size(); 
+            double fairness = 0.0; 
+            
+            for (const auto& instance : instances) {
+                double diff = instance.partiesServed - average; 
+                fairness += diff * diff;
+            } 
+            fairness = 1.0 / (1.0 + std::sqrt(fairness / instances.size())); 
+            std::cout << "Distribution fairness: " << std::fixed << std::setprecision(2) << (fairness * 100) << "%\n";
+        }
+    }
+
+    // Get remaining players in queue 
+    void getRemainingPlayers(int& tanks, int& healers, int& dps) {
+        std::lock_guard<std::mutex> lock(mtx); 
+        tanks = tankQueue.size(); 
+        healers = healerQueue.size(); 
+        dps = dpsQueue.size();
     }
 };
 
@@ -259,6 +381,10 @@ int main() {
         t2 = 15;
     } 
 
+    // Calculate maximum possible parties 
+    int maxPossibleParties = std::min({t, h, d / 3}); 
+    std::cout << "\nMaximum possible parties from input: " << maxPossibleParties << "\n";
+
     // Create and start LFG 
     LFGSystem lfgsystem(n, t1, t2); 
     std::cout << "\nStarting LFG system...\n"; 
@@ -280,6 +406,26 @@ int main() {
     // Display final status and summary 
     lfgsystem.displayStatus(); 
     lfgsystem.displaySummary(); 
+
+    // Show remaining players (if any) 
+    int remainingTanks, remainingHealers, remainingDPS; 
+    lfgsystem.getRemainingPlayers(remainingTanks, remainingHealers, remainingDPS);
+
+    if (remainingTanks > 0 || remainingHealers > 0 || remainingDPS > 0) {
+        std::cout << "\nRemaining players in queue:\n"; 
+        std::cout << "Tanks: " << remainingTanks << "\n"; 
+        std::cout << "Healers: " << remainingHealers << "\n"; 
+        std::cout << "DPS: " << remainingDPS << "\n";
+
+        // Explain why parties could not be formed 
+        if (remainingTanks == 0) {
+            std::cout << "No more tanks available to form parties.\n"; 
+        } else if (remainingHealers == 0) {
+            std::cout << "no more healers available to form parties.\n"; 
+        } else if (remainingDPS < 3) {
+            std::cout << "Not enough DPS (" << remainingDPS << ") to form parties.\n";
+        }
+    }
 
     std::cout << "\nLFG system shutdown complete."; 
 
