@@ -89,34 +89,6 @@ public:
         return tankQueue.size() >= 1 && healerQueue.size() >= 1 && dpsQueue.size() >= 3;
     } 
 
-    // Form a party and assign to instance 
-    // void formParty(int instanceId) { 
-    //     std::unique_lock<std::mutex> lock(mtx); 
-
-    //     // Wait until we can form a party or system is stopping 
-    //     cv.wait(lock, [this] { return canFormParty() || !running.load(); }); 
-    //     if (!running.load()) return; 
-
-    //     // Rmeove pl;ayers from queues to form party 
-    //     tankQueue.pop(); 
-    //     healerQueue.pop(); 
-    //     for (int i = 0; i < 3; ++i) {
-    //         dpsQueue.pop();
-    //     } 
-
-    //     // Update instance status 
-    //     instances[instanceId].status = "active"; 
-    //     instances[instanceId].active = true; 
-    //     instances[instanceId].partiesServed++; 
-    //     totalPartiesFormed++; 
-
-    //     std::cout << "Party formed and assigned to Instance " << (instanceId + 1) << "\n";
-    //     lock.unlock();
-
-    //     // Simulate dungeon run 
-    //     runDungeon(instanceId); 
-    // } 
-
     // Improved party formation with better distribution 
     bool tryFormParty(int instanceID) {
         std::unique_lock<std::mutex> lock(mtx); 
@@ -200,17 +172,6 @@ public:
 
     // Start LFG system 
     void start() {
-        // instanceThreads.reserve(maxInstances); 
-        // for (int i = 0; i < maxInstances; ++i) { 
-        //     instanceThreads.emplace_back([this, i] () {
-        //         while (running.load()) {
-        //             formParty(i); 
-        //             // small delay to prevent looping 
-        //             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        //         }
-        //     });
-        // }
-
         for (int i = 0; i < maxInstances; ++i) {
             instances[i].thread = std::thread([this, i]() {
                 instanceWorker(i);
@@ -220,15 +181,6 @@ public:
 
     // Stop LFG system 
     void stop() {
-        // running.store(false); 
-        // cv.notify_all(); 
-
-        // for (auto& thread : instanceThreads) {
-        //     if (thread.joinable()) {
-        //         thread.join();
-        //     }
-        // } 
-
         running.store(false); 
         cv.notify_all(); 
 
@@ -262,26 +214,6 @@ public:
 
     // Wait for all current parties to complete 
     void waitForCompletion() {
-        // bool hasActiveInstances; 
-
-        // do {
-        //     std::this_thread::sleep_for(std::chrono::seconds(1)); 
-
-        //     std::lock_guard<std::mutex> lock(mtx); 
-        //     hasActiveInstances = false; 
-        //     for (const auto& instance : instances) {
-        //         if (instance.active) {
-        //             hasActiveInstances = true; 
-        //             break;
-        //         }
-        //     }
-
-        //     // Check if parties can be formed 
-        //     if (!hasActiveInstances && !canFormParty()) {
-        //         break;
-        //     }
-        // } while (hasActiveInstances || canFormParty()); 
-
         bool shouldWait; 
         do {
             std::this_thread::sleep_for(std::chrono::seconds(1)); 
