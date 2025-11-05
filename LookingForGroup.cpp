@@ -213,23 +213,7 @@ public:
     // Display current status 
     void displayStatus() {
         std::lock_guard<std::mutex> lock(mtx); 
-
-        // std::cout << "\n=== Current Instance Status ===\n"; 
-        // for (const auto& instance : instances) {
-        //     std::cout << "Instance " << std::setw(2) << instance.id 
-        //               << ": " << std::setw(6) << instance.status 
-        //               << " | Parties served: " << std::setw(3) << instance.partiesServed 
-        //               << " | Total time: " << std::setw(4) << instance.totalTimeServed 
-        //               << "s\n";
-        // }
-
-        // std::cout << "\n=== Queue Status ===\n"; 
-        // std::cout << "Tanks in queue: " << tankQueue.size() << "\n"; 
-        // std::cout << "Healers in queue: " << healerQueue.size() << "\n"; 
-        // std::cout << "DPS in queue: " << dpsQueue.size() << "\n"; 
-        // std::cout << "Total parties formed: " << totalPartiesFormed.load() << "\n"; 
-        // std::cout << "Instances waiting for parties: " << instancesWaiting.load() << "\n"; 
-
+        
         synchronized_print("\n=== Current Instance Status ==="); 
         for (const auto& instance : instances) {
             std::ostringstream oss; 
@@ -290,35 +274,6 @@ public:
     // Get summary  statistics 
     void displaySummary() {
         std::lock_guard<std::mutex> lock(mtx); 
-
-        // std::cout << "\n=== Final Sumamry ===\n"; 
-
-        // int totalParties = 0; 
-        // int totalTime = 0;
-        // for (const auto& instance : instances) {
-        //     std::cout << "Instance " << std::setw(2) << instance.id 
-        //               << ": " << std::setw(3) << instance.partiesServed << " parties, " 
-        //               << std::setw(4) << instance.totalTimeServed << " seconds total \n"; 
-            
-        //     totalParties += instance.partiesServed; 
-        //     totalTime += instance.totalTimeServed;
-        // }
-
-        // std::cout << "System Total: " << totalParties << " parties, " << totalTime << " seconds\n";
-
-        // // Calculate distribution fairness 
-        // if (totalParties > 0) {
-        //     double average = static_cast<double>(totalParties) / instances.size(); 
-        //     double fairness = 0.0; 
-            
-        //     for (const auto& instance : instances) {
-        //         double diff = instance.partiesServed - average; 
-        //         fairness += diff * diff;
-        //     } 
-        //     fairness = 1.0 / (1.0 + std::sqrt(fairness / instances.size())); 
-        //     std::cout << "Distribution fairness: " << std::fixed << std::setprecision(2) << (fairness * 100) << "%\n";
-        // } 
-
         synchronized_print("\n=== Final Summary ==="); 
 
         int totalParties = 0; 
