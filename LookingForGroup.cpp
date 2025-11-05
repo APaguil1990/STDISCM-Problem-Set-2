@@ -10,12 +10,14 @@
 #include <string> 
 #include <iomanip> 
 #include <algorithm> 
+#include <sstream>
 
 class LFGSystem {
 private: 
     // Synchronization primitives 
     std::mutex mtx; 
     std::condition_variable cv; 
+    std::mutex cout_mtx;
 
     // Player queues 
     std::queue<int> tankQueue; 
@@ -50,6 +52,12 @@ private:
     std::random_device rd; 
     std::mt19937 gen; 
 
+    // Synchronized output function 
+    void synchronized_print(const std::string& message) {
+        std::lock_guard<std::mutex> cout_lock(cout_mtx); 
+        std::cout << message << std::endl;
+    }
+
 public: 
     LFGSystem(int n, int minTime, int maxTime) 
         : maxInstances(n), t1(minTime), t2(maxTime), gen(rd()) {
@@ -79,7 +87,10 @@ public:
             dpsQueue.push(1); 
         }
 
-        std::cout << "Added " << tanks << " tanks, " << healers << " healers, " << dps << " DPS to queue.\n"; 
+        std::ostringstream oss;
+        // std::cout << "Added " << tanks << " tanks, " << healers << " healers, " << dps << " DPS to queue.\n"; 
+        oss << "Added " << tanks << " tanks, " << healers << " healers, " << dps << " DPS to queue."; 
+        synchronized_print(oss.str());
         cv.notify_all();
     }
 
@@ -116,10 +127,12 @@ public:
         instances[instanceID].partiesServed++; 
         totalPartiesFormed++; 
 
-        std::cout << "Instance " << (instanceID + 1) << " formed a party. "
+        std::ostringstream oss;
+        oss << "Instance " << (instanceID + 1) << " formed a party. "
                   << "Remaining - Tanks: " << tankQueue.size() 
                   << ", Healers: " << healerQueue.size() 
                   << ", DPS: " << dpsQueue.size() << "\n";
+        synchronized_print(oss.str());
         
         return true;
     }
@@ -155,7 +168,10 @@ public:
         std::uniform_int_distribution<> dis(t1, t2); 
         int dungeonTime = dis(gen); 
 
-        std::cout << "Instace " << (instanceId + 1) << " starting dungeon (estimated time: " << dungeonTime << "s)\n";
+        std::ostringstream oss1;
+        // std::cout << "Instance " << (instanceId + 1) << " starting dungeon (estimated time: " << dungeonTime << "s)\n"; 
+        oss1 << "Instance " << (instanceId + 1) << " starting dungeon (estimated time: " << dungeonTime << "s)";
+        synchronized_print(oss1.str());
 
         // Simulate dungeon run time 
         std::this_thread::sleep_for(std::chrono::seconds(dungeonTime)); 
@@ -166,7 +182,10 @@ public:
         instances[instanceId].active = false; 
         instances[instanceId].totalTimeServed += dungeonTime; 
 
-        std::cout << "Instance " << (instanceId + 1) << " completed dungeon in " << dungeonTime << "s\n";
+        std::ostringstream oss2;
+        // std::cout << "Instance " << (instanceId + 1) << " completed dungeon in " << dungeonTime << "s\n"; 
+        oss2 << "Instance " << (instanceId + 1) << " completed dungeon in " << dungeonTime << "s"; 
+        synchronized_print(oss2.str());
         cv.notify_all(); 
     }
 
@@ -195,21 +214,53 @@ public:
     void displayStatus() {
         std::lock_guard<std::mutex> lock(mtx); 
 
-        std::cout << "\n=== Current Instance Status ===\n"; 
+        // std::cout << "\n=== Current Instance Status ===\n"; 
+        // for (const auto& instance : instances) {
+        //     std::cout << "Instance " << std::setw(2) << instance.id 
+        //               << ": " << std::setw(6) << instance.status 
+        //               << " | Parties served: " << std::setw(3) << instance.partiesServed 
+        //               << " | Total time: " << std::setw(4) << instance.totalTimeServed 
+        //               << "s\n";
+        // }
+
+        // std::cout << "\n=== Queue Status ===\n"; 
+        // std::cout << "Tanks in queue: " << tankQueue.size() << "\n"; 
+        // std::cout << "Healers in queue: " << healerQueue.size() << "\n"; 
+        // std::cout << "DPS in queue: " << dpsQueue.size() << "\n"; 
+        // std::cout << "Total parties formed: " << totalPartiesFormed.load() << "\n"; 
+        // std::cout << "Instances waiting for parties: " << instancesWaiting.load() << "\n"; 
+
+        synchronized_print("\n=== Current Instance Status ==="); 
         for (const auto& instance : instances) {
-            std::cout << "Instance " << std::setw(2) << instance.id 
-                      << ": " << std::setw(6) << instance.status 
-                      << " | Parties served: " << std::setw(3) << instance.partiesServed 
-                      << " | Total time: " << std::setw(4) << instance.totalTimeServed 
-                      << "s\n";
+            std::ostringstream oss; 
+            oss << "Instance " << std::setw(2) << instance.id 
+                << ": " << std::setw(6) << instance.status 
+                << " | Parties served: " << std::setw(3) << instance.partiesServed 
+                << " | Total time: " << std::setw(4) << instance.totalTimeServed 
+                << "s";
+            synchronized_print(oss.str());
         }
 
-        std::cout << "\n=== Queue Status ===\n"; 
-        std::cout << "Tanks in queue: " << tankQueue.size() << "\n"; 
-        std::cout << "Healers in queue: " << healerQueue.size() << "\n"; 
-        std::cout << "DPS in queue: " << dpsQueue.size() << "\n"; 
-        std::cout << "Total parties formed: " << totalPartiesFormed.load() << "\n"; 
-        std::cout << "Instances waiting for parties: " << instancesWaiting.load() << "\n";
+        synchronized_print("\n=== Queue Status ==="); 
+        std::ostringstream oss1; 
+        oss1 << "Tanks in queue: " << tankQueue.size(); 
+        synchronized_print(oss1.str()); 
+
+        std::ostringstream oss2; 
+        oss2 << "Healers in queue: " << healerQueue.size(); 
+        synchronized_print(oss2.str()); 
+
+        std::ostringstream oss3; 
+        oss3 << "DPS in queue: " << dpsQueue.size(); 
+        synchronized_print(oss3.str()); 
+
+        std::ostringstream oss4; 
+        oss4 << "Total parties formed: " << totalPartiesFormed.load(); 
+        synchronized_print(oss4.str()); 
+
+        std::ostringstream oss5; 
+        oss5 << "Instances waiting for parties: " << instancesWaiting.load(); 
+        synchronized_print(oss5.str());
     }
 
     // Wait for all current parties to complete 
@@ -240,22 +291,54 @@ public:
     void displaySummary() {
         std::lock_guard<std::mutex> lock(mtx); 
 
-        std::cout << "\n=== Final Sumamry ===\n"; 
+        // std::cout << "\n=== Final Sumamry ===\n"; 
+
+        // int totalParties = 0; 
+        // int totalTime = 0;
+        // for (const auto& instance : instances) {
+        //     std::cout << "Instance " << std::setw(2) << instance.id 
+        //               << ": " << std::setw(3) << instance.partiesServed << " parties, " 
+        //               << std::setw(4) << instance.totalTimeServed << " seconds total \n"; 
+            
+        //     totalParties += instance.partiesServed; 
+        //     totalTime += instance.totalTimeServed;
+        // }
+
+        // std::cout << "System Total: " << totalParties << " parties, " << totalTime << " seconds\n";
+
+        // // Calculate distribution fairness 
+        // if (totalParties > 0) {
+        //     double average = static_cast<double>(totalParties) / instances.size(); 
+        //     double fairness = 0.0; 
+            
+        //     for (const auto& instance : instances) {
+        //         double diff = instance.partiesServed - average; 
+        //         fairness += diff * diff;
+        //     } 
+        //     fairness = 1.0 / (1.0 + std::sqrt(fairness / instances.size())); 
+        //     std::cout << "Distribution fairness: " << std::fixed << std::setprecision(2) << (fairness * 100) << "%\n";
+        // } 
+
+        synchronized_print("\n=== Final Summary ==="); 
 
         int totalParties = 0; 
-        int totalTime = 0;
+        int totalTime = 0; 
         for (const auto& instance : instances) {
-            std::cout << "Instance " << std::setw(2) << instance.id 
-                      << ": " << std::setw(3) << instance.partiesServed << " parties, " 
-                      << std::setw(4) << instance.totalTimeServed << " seconds total \n"; 
-            
+            std::ostringstream oss; 
+            oss <<  "Instance " << std::setw(2) << instance.id 
+                << ": " << std::setw(3) << instance.partiesServed << " parties, "
+                << std::setw(4) << instance.totalTimeServed << " seconds total"; 
+            synchronized_print(oss.str());
+
             totalParties += instance.partiesServed; 
             totalTime += instance.totalTimeServed;
-        }
+        } 
 
-        std::cout << "System Total: " << totalParties << " parties, " << totalTime << " seconds\n";
+        std::ostringstream oss_total; 
+        oss_total << "System Total: " << totalParties << " parties, " << totalTime << " seconds"; 
+        synchronized_print(oss_total.str());
 
-        // Calculate distribution fairness 
+        // Calculate distribution fairness
         if (totalParties > 0) {
             double average = static_cast<double>(totalParties) / instances.size(); 
             double fairness = 0.0; 
@@ -265,7 +348,10 @@ public:
                 fairness += diff * diff;
             } 
             fairness = 1.0 / (1.0 + std::sqrt(fairness / instances.size())); 
-            std::cout << "Distribution fairness: " << std::fixed << std::setprecision(2) << (fairness * 100) << "%\n";
+            
+            std::ostringstream oss_fair;
+            oss_fair << "Distribution fairness: " << std::fixed << std::setprecision(2) << (fairness * 100) << "%"; 
+            synchronized_print(oss_fair.str());
         }
     }
 
