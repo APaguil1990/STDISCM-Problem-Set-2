@@ -52,10 +52,24 @@ private:
     std::random_device rd; 
     std::mt19937 gen; 
 
+    // Get current timestamp string 
+    std::string get_timestamp() {
+        auto now = std::chrono::system_clock::now(); 
+        auto in_time_t = std::chrono::system_clock::to_time_t(now); 
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()) % 1000; 
+        
+        std::stringstream ss; 
+        ss << std::put_time(std::localtime(&in_time_t), "%H:%M:%S"); 
+        ss << "." << std::setfill('0') << std::setw(3) << ms.count(); 
+        return ss.str();
+    }
+
     // Synchronized output function 
     void synchronized_print(const std::string& message) {
         std::lock_guard<std::mutex> cout_lock(cout_mtx); 
-        std::cout << message << std::endl;
+        // std::cout << message << std::endl; 
+        std::cout << "[" << get_timestamp() << "] " << message << std::endl;
     }
 
 public: 
@@ -88,7 +102,6 @@ public:
         }
 
         std::ostringstream oss;
-        // std::cout << "Added " << tanks << " tanks, " << healers << " healers, " << dps << " DPS to queue.\n"; 
         oss << "Added " << tanks << " tanks, " << healers << " healers, " << dps << " DPS to queue."; 
         synchronized_print(oss.str());
         cv.notify_all();
@@ -96,7 +109,6 @@ public:
 
     // Check if party can be formed 
     bool canFormParty() { 
-        // return !tankQueue.empty() && !healerQueue.empty() && dpsQueue.size() >= 3; 
         return tankQueue.size() >= 1 && healerQueue.size() >= 1 && dpsQueue.size() >= 3;
     } 
 
@@ -169,7 +181,6 @@ public:
         int dungeonTime = dis(gen); 
 
         std::ostringstream oss1;
-        // std::cout << "Instance " << (instanceId + 1) << " starting dungeon (estimated time: " << dungeonTime << "s)\n"; 
         oss1 << "Instance " << (instanceId + 1) << " starting dungeon (estimated time: " << dungeonTime << "s)";
         synchronized_print(oss1.str());
 
@@ -183,7 +194,6 @@ public:
         instances[instanceId].totalTimeServed += dungeonTime; 
 
         std::ostringstream oss2;
-        // std::cout << "Instance " << (instanceId + 1) << " completed dungeon in " << dungeonTime << "s\n"; 
         oss2 << "Instance " << (instanceId + 1) << " completed dungeon in " << dungeonTime << "s"; 
         synchronized_print(oss2.str());
         cv.notify_all(); 
