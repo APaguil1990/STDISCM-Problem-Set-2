@@ -36,11 +36,9 @@ The program accepts the following inputs interactively:
 - Healers: 10 
 - DPS: 30 
 
-**Expected Behavior**: Forms 10 perfect parties (utilizes all players) 
-
-**Output Pattern**: All instances serve parties, 100% distribution fairness 
-
-**Remaining Players**: None
+**Expected Behavior**: Forms 10 perfect parties (utilizes all players) <br>
+**Output Pattern**: All instances serve parties, 100% distribution fairness <br>
+**Remaining Players**: None <br>
 
 ### **Test Case 2: No Healers** 
 - Tanks: 20
@@ -48,9 +46,7 @@ The program accepts the following inputs interactively:
 - DPS: 30
 
 **Expected Behavior**: Forms only 5 parties (limited by healers) 
-
 **Output Pattern**: System identifies "No more healers available"
-
 **Remaining Players**: 15 tanks, 35 DPS
 
 ### **Test Case 3: No Tanks** 
@@ -59,9 +55,7 @@ The program accepts the following inputs interactively:
 - DPS: 100
 
 **Expected Behavior**: Froms 10 parties (limited by tanks)
-
 **Output Pattern**: System identifes "No more tanks available"
-
 **Remaining Players**: 40 healers, 70 DPS
 
 ### **Test Case 4: Large-Scale Test** 
@@ -70,9 +64,7 @@ The program accepts the following inputs interactively:
 - DPS: 1000
 
 **Expected Behavior**: Forms 200 parties (limited by tanks & Healers)
-
 **Output Pattern**: System will eventually identify "No more tanks available" & "No more healers available"
-
 **Remaining Players**: 400 DPS
 
 ## Output Features 
