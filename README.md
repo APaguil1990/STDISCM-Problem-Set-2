@@ -75,5 +75,30 @@ The program accepts the following inputs interactively:
 
 **Remaining Players**: 400 DPS
 
+## Output Features 
+- **Timestamped Logs**: All events include precise timestamps (**HH:MM:SS.mmm**) 
+- **Real-time Status**: Current instance states and queue counts 
+- **Party Formation**: Instance assignments with remaining player counts 
+- **Dungeon Simulation**: Random clear times between t1-t2 seconds 
+- **Comprehensive Summary**: Final statistics including distribution fairness 
+
+## Synchronization Guarantees 
+- **No Deadlocks**: Timeout mechanisms and careful lock ordering 
+- **No Starvation**: Fair competition with instance waiting counters 
+- **Thread Safety**: Mutex-protected shared data structures 
+- **Clean Shutdown**: Proper thread joining and resource cleanup 
+
+## Key Algorithms 
+1. **Party Formation**: Atomic claim of 1 tank, 1 healer, and 3 DPS 
+2. **Fair Distribution**: Strategic delays and instance waiting counters 
+3. **Deadlock Prevention**: Timed waits and atomic state management 
+4. **Bottleneck Detection**: Identifies limiting roles in party formation 
+
+## Performance Metrics 
+- **Distribution Fairness**: Calculates how evenly parties are distributed 
+- **Total Throughput**: Parties served and total dungeon time 
+- **Queue Efficiency**: Player utilization rates 
+- **Instance Utilization**: Active time vs idle time per instance
+
 ## Demo Video Link 
 - https://drive.google.com/file/d/1EB2dJQ-P853cS2Fd7s9qWCIx9YzdLrRB/view?usp=sharing 
