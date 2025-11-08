@@ -45,27 +45,27 @@ The program accepts the following inputs interactively:
 - Healers: 5
 - DPS: 30
 
-**Expected Behavior**: Forms only 5 parties (limited by healers) 
-**Output Pattern**: System identifies "No more healers available"
-**Remaining Players**: 15 tanks, 35 DPS
+**Expected Behavior**: Forms only 5 parties (limited by healers) <br>
+**Output Pattern**: System identifies "No more healers available" <br>
+**Remaining Players**: 15 tanks, 35 DPS <br>
 
 ### **Test Case 3: No Tanks** 
 - Tanks: 10
 - Healers: 50
 - DPS: 100
 
-**Expected Behavior**: Froms 10 parties (limited by tanks)
-**Output Pattern**: System identifes "No more tanks available"
-**Remaining Players**: 40 healers, 70 DPS
+**Expected Behavior**: Froms 10 parties (limited by tanks) <br>
+**Output Pattern**: System identifes "No more tanks available" <br>
+**Remaining Players**: 40 healers, 70 DPS <br>
 
 ### **Test Case 4: Large-Scale Test** 
 - Tanks: 200 
 - Healers: 200
 - DPS: 1000
 
-**Expected Behavior**: Forms 200 parties (limited by tanks & Healers)
-**Output Pattern**: System will eventually identify "No more tanks available" & "No more healers available"
-**Remaining Players**: 400 DPS
+**Expected Behavior**: Forms 200 parties (limited by tanks & Healers) <br>
+**Output Pattern**: System will eventually identify "No more tanks available" & "No more healers available" <br>
+**Remaining Players**: 400 DPS <br>
 
 ## Output Features 
 - **Timestamped Logs**: All events include precise timestamps (**HH:MM:SS.mmm**) 
