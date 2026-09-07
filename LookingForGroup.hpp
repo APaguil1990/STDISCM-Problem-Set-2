@@ -126,7 +126,7 @@ private:
     // Shared simulation state protected by stateMutex_.
     std::size_t totalPartiesFormed_{0}; 
     std::size_t activeRuns_{0};
-    bool stated_{false}; 
+    bool started_{false}; 
     bool shutdownRequested_{false}; 
 
     // Separately protects start/shutdown operations and thread lifecycle changes. 
