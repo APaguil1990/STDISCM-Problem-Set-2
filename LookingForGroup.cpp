@@ -1,416 +1,113 @@
-#include <iostream> 
-#include <thread> 
-#include <mutex>
-#include <condition_variable> 
-#include <vector> 
-#include <queue> 
-#include <atomic> 
-#include <random> 
-#include <chrono> 
-#include <string> 
-#include <iomanip> 
-#include <algorithm> 
+#include "LookingForGroup.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <iostream>
+#include <optional>
+#include <random>
 #include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
 
-class LFGSystem {
-private: 
-    // Synchronization primitives 
-    std::mutex mtx; 
-    std::condition_variable cv; 
-    std::mutex cout_mtx;
+namespace lfg {
+namespace {
 
-    // Player queues 
-    std::queue<int> tankQueue; 
-    std::queue<int> healerQueue; 
-    std::queue<int> dpsQueue; 
+// Calculates the mamximum number of complete parties that can be formed. 
+std::size_t calculateMaximumParties(const PlayerCounts& players) noexcept {
+    return std::min( {players.tanks, players.healers, players.dps / 3U} );
+}
 
-    // Instance management 
-    struct Instance {
-        int id; 
-        std::string status; 
-        int partiesServed; 
-        int totalTimeServed; 
-        bool active; 
-        std::thread thread;
+// Creates an independent random-number engine for a dungeon instance. 
+// Each worker owns its RNG, avoiding synchronization between threads. 
+std::mt19937 makeRandomEngine(std::size_t instanceId) {
+    std::random_device rd;
 
-        Instance(int i) : id(i), status("empty"), partiesServed(0), totalTimeServed(0), active(false) {} 
-    }; 
+    // Include the instance ID in the seed to further differentiate workers. 
+    const auto idLow = static_cast<unsigned int>(instanceId & 0xFFFFFFFFU);
+    const auto idHigh = static_cast<unsigned int>((instanceId >> 32U) & 0xFFFFFFFFU);
 
-    std::vector<Instance> instances; 
-    // std::vector<std::thread> instanceThreads; 
+    std::seed_seq seed {
+        rd(), rd(), rd(), rd(), idLow, idHigh
+    };
 
-    // Statistics 
-    std::atomic<int> totalPartiesFormed{0}; 
-    std::atomic<bool> running{true}; 
-    std::atomic<int> instancesWaiting{0};
+    return std::mt19937(seed);
+}
 
-    // Configuration 
-    int maxInstances; 
-    int t1, t2;
-
-    // Random number generation 
-    std::random_device rd; 
-    std::mt19937 gen; 
-
-    // Get current timestamp string 
-    std::string get_timestamp() {
-        auto now = std::chrono::system_clock::now(); 
-        auto in_time_t = std::chrono::system_clock::to_time_t(now); 
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now.time_since_epoch()) % 1000; 
-        
-        std::stringstream ss; 
-        ss << std::put_time(std::localtime(&in_time_t), "%H:%M:%S"); 
-        ss << "." << std::setfill('0') << std::setw(3) << ms.count(); 
-        return ss.str();
-    }
-
-    // Synchronized output function 
-    void synchronized_print(const std::string& message) {
-        std::lock_guard<std::mutex> cout_lock(cout_mtx); 
-        // std::cout << message << std::endl; 
-        std::cout << "[" << get_timestamp() << "] " << message << std::endl;
-    }
-
-public: 
-    LFGSystem(int n, int minTime, int maxTime) 
-        : maxInstances(n), t1(minTime), t2(maxTime), gen(rd()) {
-        instances.reserve(maxInstances); 
-        for (int i = 0; i < maxInstances; ++i) {
-            instances.emplace_back(i + 1);
-        }
+// Validates simulation configuration before worker threads are created. 
+void validateConfiguration(const LFGConfig& config) {
+    if (config.maxInstances == 0u) {
+        throw std::invalid_argument("maxInstances must be greater than zero");
     } 
 
-    ~LFGSystem() {
-        stop();
+    if (config.minClearTimeSeconds < 1 || config.minClearTimeSeconds > 15) {
+        throw std::invalid_argument("minClearTimeSeconds must be between 1 and 15"); 
     } 
 
-    // Add players to queues 
-    void addPlayers(int tanks, int healers, int dps) {
-        std::lock_guard<std::mutex> lock(mtx); 
-
-        for (int i = 0; i < tanks; ++i) {
-            tankQueue.push(1);
-        } 
-
-        for (int i = 0; i < healers; ++i) {
-            healerQueue.push(1); 
-        } 
-
-        for (int i = 0; i < dps; ++i) {
-            dpsQueue.push(1); 
-        }
-
-        std::ostringstream oss;
-        oss << "Added " << tanks << " tanks, " << healers << " healers, " << dps << " DPS to queue."; 
-        synchronized_print(oss.str());
-        cv.notify_all();
-    }
-
-    // Check if party can be formed 
-    bool canFormParty() { 
-        return tankQueue.size() >= 1 && healerQueue.size() >= 1 && dpsQueue.size() >= 3;
+    if (config.maxClearTimeSeconds < 1 || config.maxClearTimeSeconds > 15) {
+        throw std::invalid_argument("maxClearTimeSeconds must be between 1 and 15");
     } 
 
-    // Improved party formation with better distribution 
-    bool tryFormParty(int instanceID) {
-        std::unique_lock<std::mutex> lock(mtx); 
-
-        // Use timed wait to prevent instances from starving one another 
-        if (!cv.wait_for(lock, std::chrono::milliseconds(100), 
-                        [this] { return canFormParty() && instancesWaiting > 0; })) {
-            return false;
-        } 
-
-        if (!canFormParty() || !running.load()) {
-            return false;
-        } 
-
-        // Remove players from queues to form party 
-        tankQueue.pop(); 
-        healerQueue.pop(); 
-        for (int i = 0; i < 3; ++i) {
-            dpsQueue.pop();
-        } 
-
-        // Update instance status 
-        instances[instanceID].status = "active"; 
-        instances[instanceID].active = true; 
-        instances[instanceID].partiesServed++; 
-        totalPartiesFormed++; 
-
-        std::ostringstream oss;
-        oss << "Instance " << (instanceID + 1) << " formed a party. "
-                  << "Remaining - Tanks: " << tankQueue.size() 
-                  << ", Healers: " << healerQueue.size() 
-                  << ", DPS: " << dpsQueue.size() << "\n";
-        synchronized_print(oss.str());
-        
-        return true;
+    if (config.maxClearTimeSeconds < config.minClearTimeSeconds) {
+        throw std::invalid_argument("maxClearTimeSeconds must be >= minClearTimeSeconds");
     }
+}
 
-    // Instance thread function with improved synchronzation 
-    void instanceWorker(int instanceId) {
-        while (running.load()) {
-            {
-                std::lock_guard<std::mutex> lock(mtx); 
-                instancesWaiting++; 
-            } 
+} // namespace
 
-            if (tryFormParty(instanceId)) {
-                // Successfully formed a party, run dungeon 
-                runDungeon(instanceId); 
-
-                // Small delay to give other instances a chance 
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            } else {
-                // Couldn't form party, wait before trying 
-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            } 
-
-            {
-                std::lock_guard<std::mutex> lock(mtx); 
-                instancesWaiting--;
-            }
-        }
-    }
-
-    // Simulate dungeon run with random time 
-    void runDungeon(int instanceId) {
-        std::uniform_int_distribution<> dis(t1, t2); 
-        int dungeonTime = dis(gen); 
-
-        std::ostringstream oss1;
-        oss1 << "Instance " << (instanceId + 1) << " starting dungeon (estimated time: " << dungeonTime << "s)";
-        synchronized_print(oss1.str());
-
-        // Simulate dungeon run time 
-        std::this_thread::sleep_for(std::chrono::seconds(dungeonTime)); 
-
-        // Update instance status 
-        std::lock_guard<std::mutex> lock(mtx); 
-        instances[instanceId].status = "empty"; 
-        instances[instanceId].active = false; 
-        instances[instanceId].totalTimeServed += dungeonTime; 
-
-        std::ostringstream oss2;
-        oss2 << "Instance " << (instanceId + 1) << " completed dungeon in " << dungeonTime << "s"; 
-        synchronized_print(oss2.str());
-        cv.notify_all(); 
-    }
-
-    // Start LFG system 
-    void start() {
-        for (int i = 0; i < maxInstances; ++i) {
-            instances[i].thread = std::thread([this, i]() {
-                instanceWorker(i);
-            });
-        }
+// Converts a strongly typed instance state into readable text. 
+const char* toString(InstanceStatus status) noexcept {
+    switch (status) {
+        case InstanceStatus::Idle:
+            return "Idle";
+        case InstanceStatus::Waiting:
+            return "Waiting";
+        case InstanceStatus::Running:
+            return "Running";
+        case InstanceStatus::Stopped:
+            return "Stopped";
     } 
 
-    // Stop LFG system 
-    void stop() {
-        running.store(false); 
-        cv.notify_all(); 
+    return "Unknown";
+}
 
-        for (auto& instance : instances) {
-            if (instance.thread.joinable()) {
-                instance.thread.join();
-            }
-        }
+// Provides synchronized timestamped console output for all worker threads. 
+class LFGSystem::ThreadSafeLogger {
+public:
+    // Serializes console access so messages from different threads do not interview. 
+    void log(std::string_view message) {
+        std::lock_guard<std::mutex> lock(outputMutex_);
+        std::cout << '[' << timestampLocked() << "] " << message << '\n';
     }
 
-    // Display current status 
-    void displayStatus() {
-        std::lock_guard<std::mutex> lock(mtx); 
-        
-        synchronized_print("\n=== Current Instance Status ==="); 
-        for (const auto& instance : instances) {
-            std::ostringstream oss; 
-            oss << "Instance " << std::setw(2) << instance.id 
-                << ": " << std::setw(6) << instance.status 
-                << " | Parties served: " << std::setw(3) << instance.partiesServed 
-                << " | Total time: " << std::setw(4) << instance.totalTimeServed 
-                << "s";
-            synchronized_print(oss.str());
-        }
+private:
+    // Produces a timestamp in HH:MM:SS.mmm format. 
+    // Called while outputMutex_ is held, protecting std::localtime usage. 
+    std::string timestampLocked() const {
+        const auto now = std::chrono::system_clock::now();
+        const auto timePointMilliseconds = std::chrono::time_point_cast<std::chrono::milliseconds>(now);
+        const auto milliseconds = timePointMilliseconds.time_since_epoch() % std::chrono::seconds(1); 
+        const std::time_t rawTime = std::chrono::system_clock::to_time_t(now);
+        std::tm localTime{};
 
-        synchronized_print("\n=== Queue Status ==="); 
-        std::ostringstream oss1; 
-        oss1 << "Tanks in queue: " << tankQueue.size(); 
-        synchronized_print(oss1.str()); 
-
-        std::ostringstream oss2; 
-        oss2 << "Healers in queue: " << healerQueue.size(); 
-        synchronized_print(oss2.str()); 
-
-        std::ostringstream oss3; 
-        oss3 << "DPS in queue: " << dpsQueue.size(); 
-        synchronized_print(oss3.str()); 
-
-        std::ostringstream oss4; 
-        oss4 << "Total parties formed: " << totalPartiesFormed.load(); 
-        synchronized_print(oss4.str()); 
-
-        std::ostringstream oss5; 
-        oss5 << "Instances waiting for parties: " << instancesWaiting.load(); 
-        synchronized_print(oss5.str());
-    }
-
-    // Wait for all current parties to complete 
-    void waitForCompletion() {
-        bool shouldWait; 
-        do {
-            std::this_thread::sleep_for(std::chrono::seconds(1)); 
-
-            std::lock_guard<std::mutex> lock(mtx); 
-            shouldWait = false; 
-
-            // Check if any isntance is active 
-            for (const auto& instance : instances) {
-                if (instance.active) {
-                    shouldWait = true; 
-                    break;
-                }
-            } 
-
-            // Check if more parties can be formed 
-            if (!shouldWait && canFormParty()) {
-                shouldWait = true;
-            }
-        } while(shouldWait);
-    }
-
-    // Get summary  statistics 
-    void displaySummary() {
-        std::lock_guard<std::mutex> lock(mtx); 
-        synchronized_print("\n=== Final Summary ==="); 
-
-        int totalParties = 0; 
-        int totalTime = 0; 
-        for (const auto& instance : instances) {
-            std::ostringstream oss; 
-            oss <<  "Instance " << std::setw(2) << instance.id 
-                << ": " << std::setw(3) << instance.partiesServed << " parties, "
-                << std::setw(4) << instance.totalTimeServed << " seconds total"; 
-            synchronized_print(oss.str());
-
-            totalParties += instance.partiesServed; 
-            totalTime += instance.totalTimeServed;
+        // Copy the returned time data while access is serialized by the logger mutex. 
+        if (const std::tm* converted = std::localtime(&rawTime); converted != nullptr) {
+            localTime = *converted;
         } 
 
-        std::ostringstream oss_total; 
-        oss_total << "System Total: " << totalParties << " parties, " << totalTime << " seconds"; 
-        synchronized_print(oss_total.str());
+        std::ostringstream out; 
+        out << std::put_time(&localTime, "%H:%M:%S") << '-' 
+            << std::setfill('0') << std::setw(3) << milliseconds.count();
 
-        // Calculate distribution fairness
-        if (totalParties > 0) {
-            double average = static_cast<double>(totalParties) / instances.size(); 
-            double fairness = 0.0; 
-            
-            for (const auto& instance : instances) {
-                double diff = instance.partiesServed - average; 
-                fairness += diff * diff;
-            } 
-            fairness = 1.0 / (1.0 + std::sqrt(fairness / instances.size())); 
-            
-            std::ostringstream oss_fair;
-            oss_fair << "Distribution fairness: " << std::fixed << std::setprecision(2) << (fairness * 100) << "%"; 
-            synchronized_print(oss_fair.str());
-        }
+        return out.str();
     }
 
-    // Get remaining players in queue 
-    void getRemainingPlayers(int& tanks, int& healers, int& dps) {
-        std::lock_guard<std::mutex> lock(mtx); 
-        tanks = tankQueue.size(); 
-        healers = healerQueue.size(); 
-        dps = dpsQueue.size();
-    }
+    // Protects console output and timestamp conversion. 
+    std::mutex outputMutex_;
 };
 
-int main() {
-    std::cout << "=== LFG (Looking for Group) Dungeon Queuing System ===\n\n"; 
-
-    // Get user input 
-    int n, t, h, d, t1, t2; 
-
-    std::cout << "Enter maximum number of concurrent instances (n): "; 
-    std::cin >> n; 
-
-    std::cout << "Enter number of tank players in queue (t): "; 
-    std::cin >> t; 
-
-    std::cout << "Enter number of healer players in queue (h): "; 
-    std::cin >> h; 
-
-    std::cout << "Enter a number of DPS players in queue (d): "; 
-    std::cin >> d; 
-
-    std::cout << "Enter a minimum dungeon clear time (t1): "; 
-    std::cin >> t1; 
-
-    std::cout << "Enter maximum dungeon clear time (t2): "; 
-    std::cin >> t2;
-
-    // Validate input 
-    if (n <= 0 || t < 0 || h < 0 || d < 0 || t1 < 0 || t2 < t1) {
-        std::cerr << "Invalid input parameters!\n"; 
-        return 1;
-    } 
-
-    if (t2 > 15) {
-        std::cout << "Note: t2 should be <= 15 for testing. Adjusting to 15.\n"; 
-        t2 = 15;
-    } 
-
-    // Calculate maximum possible parties 
-    int maxPossibleParties = std::min({t, h, d / 3}); 
-    std::cout << "\nMaximum possible parties from input: " << maxPossibleParties << "\n";
-
-    // Create and start LFG 
-    LFGSystem lfgsystem(n, t1, t2); 
-    std::cout << "\nStarting LFG system...\n"; 
-    lfgsystem.start();
-
-    // Add initial players 
-    lfgsystem.addPlayers(t, h, d); 
-
-    // Display initial status 
-    lfgsystem.displayStatus(); 
-
-    // Wait for all parties to complete 
-    std::cout << "\nWaiting for all parties to complete...\n"; 
-    lfgsystem.waitForCompletion(); 
-
-    // Stop the system 
-    lfgsystem.stop(); 
-
-    // Display final status and summary 
-    lfgsystem.displayStatus(); 
-    lfgsystem.displaySummary(); 
-
-    // Show remaining players (if any) 
-    int remainingTanks, remainingHealers, remainingDPS; 
-    lfgsystem.getRemainingPlayers(remainingTanks, remainingHealers, remainingDPS);
-
-    if (remainingTanks > 0 || remainingHealers > 0 || remainingDPS > 0) {
-        std::cout << "\nRemaining players in queue:\n"; 
-        std::cout << "Tanks: " << remainingTanks << "\n"; 
-        std::cout << "Healers: " << remainingHealers << "\n"; 
-        std::cout << "DPS: " << remainingDPS << "\n";
-
-        // Explain why parties could not be formed 
-        if (remainingTanks == 0) {
-            std::cout << "No more tanks available to form parties.\n"; 
-        } else if (remainingHealers == 0) {
-            std::cout << "no more healers available to form parties.\n"; 
-        } else if (remainingDPS < 3) {
-            std::cout << "Not enough DPS (" << remainingDPS << ") to form parties.\n";
-        }
-    }
-
-    std::cout << "\nLFG system shutdown complete."; 
-
-    return 0;
-}
+} // namespace lfg
