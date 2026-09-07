@@ -156,7 +156,7 @@ private:
             // Log completed atomic party claim. 
             {
                 std::ostringstream message; 
-                message << "Instance" << id_ << " formed party " << claim->partyId
+                message << "Instance " << id_ << " formed party " << claim->partyId
                         << ". Remaining - Tanks: " << claim->remainingPlayers.tanks
                         << ", Healers: " << claim->remainingPlayers.healers
                         << ", DPS: " << claim->remainingPlayers.dps;
@@ -250,7 +250,7 @@ void LFGSystem::start() {
         }
 
         started_ = true;
-        shutdownRequested_ = true;
+        shutdownRequested_ = false;
     }
 
     try {
