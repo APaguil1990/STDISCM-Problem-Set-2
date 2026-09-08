@@ -354,7 +354,309 @@ Fewer than 3 DPS players remain.
 ## Test Cases 
 The following test cases verify balanced queues, role bottlenecks, empty roles, more workers than parties, and larger workloads.
 
+### Test Case 1: Balanced Queue
+```text
+Instances: 3
+Tanks:     10
+Healers:   10
+DPS:       30
+Min Time:  1
+Max Time:  3
+```
 
+**Expected Parties:** `10`  
+**Expected Remaining Players:** `0 Tanks, 0 Healers, 0 DPS`
+
+### Test Case 2: Healer Bottleneck
+
+```text
+Instances: 5
+Tanks:     20
+Healers:   5
+DPS:       30
+Min Time:  1
+Max Time:  3
+```
+
+**Expected Parties:** `5`  
+**Expected Remaining Players:** `15 Tanks, 0 Healers, 15 DPS`  
+**Primary Bottleneck:** Healers
+
+### Test Case 3: Tank Bottleneck
+
+```text
+Instances: 4
+Tanks:     10
+Healers:   50
+DPS:       100
+Min Time:  1
+Max Time:  3
+```
+
+**Expected Parties:** `10`  
+**Expected Remaining Players:** `0 Tanks, 40 Healers, 70 DPS`  
+**Primary Bottleneck:** Tanks
+
+### Test Case 4: Large Queue
+
+```text
+Instances: 10
+Tanks:     200
+Healers:   200
+DPS:       1000
+Min Time:  1
+Max Time:  2
+```
+
+**Expected Parties:** `200`  
+**Expected Remaining Players:** `0 Tanks, 0 Healers, 400 DPS`  
+**Bottlenecks:** Tanks and Healers
+
+### Test Case 5: DPS Bottleneck
+
+```text
+Instances: 3
+Tanks:     10
+Healers:   10
+DPS:       11
+Min Time:  1
+Max Time:  3
+```
+
+**Expected Parties:** `3`  
+**Expected Remaining Players:** `7 Tanks, 7 Healers, 2 DPS`  
+**Primary Bottleneck:** DPS
+
+### Test Case 6: No Possible Party
+
+```text
+Instances: 5
+Tanks:     0
+Healers:   10
+DPS:       30
+Min Time:  1
+Max Time:  2
+```
+
+**Expected Parties:** `0`  
+**Expected Remaining Players:** `0 Tanks, 10 Healers, 30 DPS`
+
+The application should complete and shut down normally without hanging.
+
+### Test Case 7: More Instances Than Parties
+
+```text
+Instances: 20
+Tanks:     2
+Healers:   2
+DPS:       6
+Min Time:  1
+Max Time:  2
+```
+
+**Expected Parties:** `2`  
+**Expected Remaining Players:** `0 Tanks, 0 Healers, 0 DPS`
+
+Unused worker threads must still terminate cleanly.
+
+### Test Case 8: Not Enough DPS for One Party
+
+```text
+Instances: 4
+Tanks:     10
+Healers:   10
+DPS:       2
+Min Time:  1
+Max Time:  3
+```
+
+**Expected Parties:** `0`  
+**Expected Remaining Players:** `10 Tanks, 10 Healers, 2 DPS`
+
+### Test Case 9: Exactly One Party
+
+```text
+Instances: 1
+Tanks:     1
+Healers:   1
+DPS:       3
+Min Time:  1
+Max Time:  1
+```
+
+**Expected Parties:** `1`  
+**Expected Remaining Players:** `0 Tanks, 0 Healers, 0 DPS`
+
+### Test Case 10: Uneven Resources
+
+```text
+Instances: 5
+Tanks:     8
+Healers:   12
+DPS:       20
+Min Time:  1
+Max Time:  4
+```
+
+DPS can support only:
+
+```text
+20 / 3 = 6 parties
+```
+
+**Expected Parties:** `6`  
+**Expected Remaining Players:** `2 Tanks, 6 Healers, 2 DPS`
+
+## Invalid Input Tests
+
+The input layer should reject and re-prompt for values such as:
+
+### Invalid Instance Count
+
+```text
+Maximum concurrent instances: 0
+```
+
+Expected:
+
+```text
+Invalid value. The instance count must be greater than 0.
+```
+
+### Negative Player Count
+
+```text
+Tank players: -5
+```
+
+Expected:
+
+```text
+Invalid value. The tank count must be non-negative.
+```
+
+### Non-Numeric Input
+
+```text
+DPS players: hello
+```
+
+Expected:
+
+```text
+Invalid input. Please enter a whole number.
+```
+
+### Clear Time Below Minimum
+
+```text
+Minimum dungeon clear time in seconds: 0
+```
+
+Expected rejection because clear times must be between `1` and `15`.
+
+### Clear Time Above Maximum
+
+```text
+Maximum dungeon clear time in seconds: 20
+```
+
+Expected rejection because clear times must be between `1` and `15`.
+
+### Maximum Time Less Than Minimum
+
+```text
+Minimum dungeon clear time in seconds: 5
+Maximum dungeon clear time in seconds: 3
+```
+
+Expected:
+
+```text
+Invalid value. Maximum clear time must be >= minimum clear time.
+```
+
+## Synchronization Guarantees
+The implementation is designed around the following guarantees:
+- **Atomic Party Claims**: Exactly 1 Tank, 1 Healer, and 3 DPS are removed together
+- **No Duplicate Player Claims**: Shared player counts are protected by `stateMutex_`
+- **No Dungeon Sleep Under Shared-State Lock**: Workers release the mutex before simulating a dungeon
+- **Condition-Variable Waiting**: Workers do not repeatedly poll for available work
+- **Thread-Safe Statistics**: Shared counters and instance statistics are protected consistently
+- **Thread-Safe RNG Ownership**: Each worker has its own random engine
+- **Thread-Safe Logging**: Console output is serialized through a dedicated logger mutex
+- **Clean Worker Termination**: Shutdown wakes blocked workers and joins every thread
+- **RAII Protection**: Destructors prevent joinable worker threads from being abandoned
+- **Simple Locking Model**: Shared state and lifecycle operations use separate, clearly scoped mutexes
+
+The implementation does not rely on timeout-based synchronization or artificial sleep delays to create fairness.
+
+## Key Algorithms
+1. **Maximum Party Calculation**
+   ```cpp
+   std::min({tanks, healers, dps / 3});
+   ```
+
+2. **Atomic Party Claim**
+   ```text
+   Tank   -= 1
+   Healer -= 1
+   DPS    -= 3
+   ```
+
+3. **Worker Scheduling**
+   ```text
+   Wait on condition variable
+        |
+        +-- party available -> claim and run
+        |
+        +-- shutdown requested -> stop
+   ```
+
+4. **Completion Detection**
+   ```text
+   all possible parties claimed
+   AND
+   active dungeon runs == 0
+   ```
+
+5. **Bottleneck Detection**
+   - Tanks `< 1`
+   - Healers `< 1`
+   - DPS `< 3`
+
+## Important Correctness Invariants
+During normal simulation execution:
+- A successful party claim always consumes exactly `1 Tank`, `1 Healer`, and `3 DPS`
+- Player counts never become negative
+- Two workers cannot claim the same players
+- An instance processes at most one party at a time
+- Shared mutable simulation state is accessed under the appropriate mutex
+- No worker holds `stateMutex_` during dungeon simulation
+- Every started worker thread is eventually joined
+- The total number of formed parties never exceeds `maximumPossibleParties`
+- When all initial players are submitted before processing, the final party count equals `maximumPossibleParties`
+- Party-to-instance distribution may vary between runs
+
+## Summary 
+The refactored LFG system demonstrates:
+- C++20 object-oriented design
+- Multithreading and concurrent dungeon execution
+- Condition-variable synchronization
+- Atomic party formation
+- Thread-safe shared state
+- Per-worker random-number generation
+- RAII thread ownership
+- Robust user input validation
+- Idempotent shutdown behavior
+- Accurate remaining-player calculations
+- Scheduler-dependent instance distribution reporting
+- Multi-role bottleneck detection
+
+The implementation prioritizes correctness, understandable, synchronization, and maintainability over artificial fairness mechanisms or unnecessary abstraction.
+
+## Developed By:
+- James Archer B. Paguiligan
 
 ## Demo Video Link 
 - https://drive.google.com/file/d/1EB2dJQ-P853cS2Fd7s9qWCIx9YzdLrRB/view?usp=sharing 
